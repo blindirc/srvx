@@ -278,6 +278,7 @@ static const struct message_entry msgtab[] = {
     { "CSMSG_SET_CTCPREACTION",  "$bCTCPReaction$b %d - %s" },
     { "CSMSG_SET_TOPICREFRESH",  "$bTopicRefresh$b %d - %s" },
     { "CSMSG_SET_UNREVIEWED",    "$bUnreviewed  $b %s" },
+    { "CSMSG_SET_ANONKICKS",     "$bAnonKicks   $b %s" },
     { "CSMSG_USET_NOAUTOOP",     "$bNoAutoOp    $b %s" },
     { "CSMSG_USET_NOAUTOVOICE",  "$bNoAutoVoice $b %s" },
     { "CSMSG_USET_AUTOINVITE",   "$bAutoInvite  $b %s" },
@@ -3101,6 +3102,7 @@ eject_user(struct userNode *user, struct chanNode *channel, unsigned int argc, c
     unsigned int offset, n, victimCount, duration = 0;
     char *reason = "Bye.", *ban, *name;
     char interval[INTERVALLEN];
+    struct chanData *cData = channel->channel_info;
 
     offset = (action & ACTION_ADD_TIMED_BAN) ? 3 : 2;
     REQUIRE_PARAMS(offset);
@@ -3387,10 +3389,10 @@ eject_user(struct userNode *user, struct chanNode *channel, unsigned int argc, c
     if(action & ACTION_KICK)
     {
         char kick_reason[MAXLEN];
-        sprintf(kick_reason, "(%s) %s", user->nick, reason);
+        (cData->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", reason) : sprintf(kick_reason, "(%s) %s", user->nick, reason);
 
-        for(n = 0; n < victimCount; n++)
-            KickChannelUser(victims[n]->user, channel, chanserv, kick_reason);
+            for(n = 0; n < victimCount; n++)
+                KickChannelUser(victims[n]->user, channel, chanserv, kick_reason);
     }
 
     if(!cmd)
@@ -5452,6 +5454,11 @@ static MODCMD_FUNC(chan_opt_dynlimit)
     CHANNEL_BINARY_OPTION("CSMSG_SET_DYNLIMIT", CHANNEL_DYNAMIC_LIMIT);
 }
 
+static MODCMD_FUNC(chan_opt_anonkicks)
+{
+    CHANNEL_BINARY_OPTION("CSMSG_SET_ANONKICKS", CHANNEL_ANONKICKS);
+}
+
 static MODCMD_FUNC(chan_opt_offchannel)
 {
     struct chanData *cData = channel->channel_info;
@@ -6447,7 +6454,8 @@ handle_join(struct modeNode *mNode)
         if(bData)
         {
             char kick_reason[MAXLEN];
-            sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
+            struct chanData *cData = channel->channel_info;
+            (cData->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", bData->reason) : sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
 
             bData->triggered = now;
             if(bData != cData->bans)
@@ -6637,7 +6645,7 @@ handle_auth(struct userNode *user, UNUSED_ARG(struct handle_info *old_handle))
             change.args[0].mode = MODE_BAN;
             change.args[0].u.hostmask = ban->mask;
             mod_chanmode_announce(chanserv, chan, &change);
-            sprintf(kick_reason, "(%s) %s", ban->owner, ban->reason);
+            (chan->channel_info->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", ban->reason) : sprintf(kick_reason, "(%s) %s", ban->owner, ban->reason);
             KickChannelUser(user, chan, chanserv, kick_reason);
             ban->triggered = now;
             break;
@@ -6863,7 +6871,7 @@ handle_nick_change(struct userNode *user, UNUSED_ARG(const char *old_nick))
                 continue;
             change.args[0].u.hostmask = bData->mask;
             mod_chanmode_announce(chanserv, channel, &change);
-            sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
+            (channel->channel_info->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", bData->reason) : sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
             KickChannelUser(user, channel, chanserv, kick_reason);
             bData->triggered = now;
             break; /* we don't need to check any more bans in the channel */
@@ -7028,7 +7036,7 @@ chanserv_conf_read(void)
             /* multiple choice options */
             "CtcpReaction", "Protect", "Toys", "TopicRefresh",
             /* binary options */
-            "DynLimit", "NoDelete",
+            "DynLimit", "NoDelete", "AnonKicks",
             /* delimiter */
             NULL
         };
@@ -7874,6 +7882,7 @@ init_chanserv(const char *nick)
     DEFINE_CHANNEL_OPTION(givevoice);
     DEFINE_CHANNEL_OPTION(userinfo);
     DEFINE_CHANNEL_OPTION(dynlimit);
+    DEFINE_CHANNEL_OPTION(anonkicks);
     DEFINE_CHANNEL_OPTION(topicsnarf);
     DEFINE_CHANNEL_OPTION(nodelete);
     DEFINE_CHANNEL_OPTION(toys);

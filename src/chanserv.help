@@ -366,6 +366,7 @@
 	"TOYS:         Toggles how $b$C$b will respond to toy commands (!8ball etc).",
         "TOPICREFRESH: Controls if (and how often) $b$C$b will reset the topic.",
         "DYNLIMIT:     Adjusts user limit (+l channel mode) to prevent join floods.",
+        "ANONKICKS:    Hides operator's nick from target when using $b$C$b to remove users from the channel.",
         "$bIRCOP ONLY$b:",
         "NODELETE:     Prevents channel deletion.",
         "UNREVIEWED:   Indicates channels that have not been manually reviewed.",
