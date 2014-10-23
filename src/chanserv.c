@@ -3389,7 +3389,10 @@ eject_user(struct userNode *user, struct chanNode *channel, unsigned int argc, c
     if(action & ACTION_KICK)
     {
         char kick_reason[MAXLEN];
-        (cData->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", reason) : sprintf(kick_reason, "(%s) %s", user->nick, reason);
+        if(cData->flags & CHANNEL_ANONKICKS)
+            sprintf(kick_reason, "%s", reason);
+        else
+            sprintf(kick_reason, "(%s) %s", user->nick, reason);
 
             for(n = 0; n < victimCount; n++)
                 KickChannelUser(victims[n]->user, channel, chanserv, kick_reason);
@@ -6455,7 +6458,10 @@ handle_join(struct modeNode *mNode)
         {
             char kick_reason[MAXLEN];
             struct chanData *cData = channel->channel_info;
-            (cData->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", bData->reason) : sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
+            if(cData->flags & CHANNEL_ANONKICKS)
+                sprintf(kick_reason, "%s", bData->reason);
+            else
+                sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
 
             bData->triggered = now;
             if(bData != cData->bans)
@@ -6645,7 +6651,10 @@ handle_auth(struct userNode *user, UNUSED_ARG(struct handle_info *old_handle))
             change.args[0].mode = MODE_BAN;
             change.args[0].u.hostmask = ban->mask;
             mod_chanmode_announce(chanserv, chan, &change);
-            (chan->channel_info->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", ban->reason) : sprintf(kick_reason, "(%s) %s", ban->owner, ban->reason);
+            if(chan->channel_info->flags & CHANNEL_ANONKICKS)
+                sprintf(kick_reason, "%s", ban->reason);
+            else
+                sprintf(kick_reason, "(%s) %s", ban->owner, ban->reason);
             KickChannelUser(user, chan, chanserv, kick_reason);
             ban->triggered = now;
             break;
@@ -6871,7 +6880,10 @@ handle_nick_change(struct userNode *user, UNUSED_ARG(const char *old_nick))
                 continue;
             change.args[0].u.hostmask = bData->mask;
             mod_chanmode_announce(chanserv, channel, &change);
-            (channel->channel_info->flags & CHANNEL_ANONKICKS) ? sprintf(kick_reason, "%s", bData->reason) : sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
+            if(channel->channel_info->flags & CHANNEL_ANONKICKS)
+                sprintf(kick_reason, "%s", bData->reason);
+            else
+                sprintf(kick_reason, "(%s) %s", bData->owner, bData->reason);
             KickChannelUser(user, channel, chanserv, kick_reason);
             bData->triggered = now;
             break; /* we don't need to check any more bans in the channel */
