@@ -107,7 +107,7 @@ void replay_event_loop(void)
             /* this time fudging is to get some of the logging right */
             self->link_time = self->boot = now;
             cManager.uplink->state = AUTHENTICATING;
-            irc_introduce(cManager.uplink->password);
+            irc_introduce(cManager.uplink->password, cManager.uplink->sid);
             replay_connected = 1;
         } else if (!replay_read()) {
             log_module(MAIN_LOG, LOG_ERROR, "Connection to server lost.");

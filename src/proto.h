@@ -62,6 +62,8 @@ struct uplinkNode
     char    *password;
     char    *their_password;
 
+    char    *sid;
+
     enum cState state;
     int         tries;
     int         max_tries;
@@ -115,7 +117,7 @@ void replay_event_loop(void);
 void irc_server(struct server *srv);
 void irc_user(struct userNode *user);
 void irc_nick(struct userNode *user, const char *old_nick);
-void irc_introduce(const char *passwd);
+void irc_introduce(const char *passwd, const char *sid);
 void irc_ping(const char *something);
 void irc_pong(const char *who, const char *data);
 void irc_quit(struct userNode *user, const char *message);

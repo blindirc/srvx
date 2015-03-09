@@ -135,6 +135,8 @@ uplink_insert(const char *key, void *data, UNUSED_ARG(void *extra))
         uplink->bind_addr_len = 0;
     }
 
+    uplink->sid = database_get_data(rd->d.object, "sid", RECDB_QSTRING);
+
     uplink->next = cManager.uplinks;
     uplink->prev = NULL;
 
@@ -360,7 +362,7 @@ uplink_connect(void)
     else
     {
         uplink->state = AUTHENTICATING;
-        irc_introduce(uplink->password);
+        irc_introduce(uplink->password, uplink->sid);
     }
 
     return 1;

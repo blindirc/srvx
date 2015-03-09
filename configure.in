@@ -217,6 +217,10 @@ elif test "x$withval" = "xbahamut" ; then
   AC_MSG_RESULT([Bahamut])
   AC_DEFINE(WITH_PROTOCOL_BAHAMUT, 1, [Define if using the Bahamut dialect of IRC])
   MODULE_OBJS="$MODULE_OBJS proto-bahamut.\$(OBJEXT)"
+elif test "x$withval" = "xts6" ; then
+  AC_MSG_RESULT([TS6])
+  AC_DEFINE(WITH_PROTOCOL_TS6, 1, [Define if using the TS6 dialect of IRC])
+  MODULE_OBJS="$MODULE_OBJS proto-ts6.\$(OBJEXT)"
 elif test -r "${srcdir}/src/proto-${withval}.c" ; then
   AC_MSG_RESULT([$withval])
   MODULE_OBJS="$MODULE_OBJS proto-${withval}.\$(OBJEXT)"

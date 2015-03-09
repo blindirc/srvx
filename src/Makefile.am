@@ -49,6 +49,7 @@ EXTRA_srvx_SOURCES = \
 	main-common.c \
 	main-win32.c \
 	proto-bahamut.c \
+	proto-ts6.c \
 	proto-common.c \
 	proto-p10.c \
 	mod-blacklist.c \

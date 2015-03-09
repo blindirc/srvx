@@ -23,6 +23,8 @@
         // What IP should we bind to?
         // If you do not specify bind_address, the default is used.
         // "bind_address"   "192.168.0.10"; // use this ip to link
+        // Our SID (TS6 Only)
+        "sid"            "01S";
     };
 
     /* unused-uplink is just an example to show you how you can
