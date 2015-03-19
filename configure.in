@@ -206,7 +206,7 @@ fi
 AC_MSG_CHECKING(which protocol to use)
 AC_ARG_WITH(protocol,
 [  --with-protocol=name    Choose IRC dialect to support; one of:
-                          p10 (the default), bahamut],
+                          p10 (the default), bahamut, ts6],
 [],
 [withval="p10"])
 if test "x$withval" = "xp10" ; then

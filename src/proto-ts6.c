@@ -28,6 +28,24 @@
 #define CAPAB_NICKIP    0x20
 #define CAPAB_TSMODE    0x40
 #define CAPAB_ZIP       0x80
+#define CAPAB_QS        0x100
+#define CAPAB_EX        0x200
+#define CAPAB_CHW       0x400
+#define CAPAB_IE        0x800
+#define CAPAB_KLN       0x1000
+#define CAPAB_KNOCK     0x2000
+//#define CAPAB_ZIP       0x4000
+#define CAPAB_TB        0x8000
+#define CAPAB_UNKLN     0x10000
+#define CAPAB_CLUSTER   0x12000
+#define CAPAB_ENCAP     0x14000
+#define CAPAB_SERVICES  0x18000
+#define CAPAB_RSFNC     0x20000
+#define CAPAB_SAVE      0x22000
+#define CAPAB_EUID      0x24000
+#define CAPAB_EOPMOD    0x28000
+#define CAPAB_BAN       0x30000
+#define CAPAB_MLOCK     0x32000
 
 struct service_message_info {
     privmsg_func_t on_privmsg;
@@ -44,7 +62,7 @@ const char irc_user_mode_chars[] = "o iw dkg      r   ";
 void irc_svsmode(struct userNode *target, char *modes, unsigned long stamp);
 
 struct server *
-AddServer(struct server *uplink, const char *name, int hops, unsigned long boot, unsigned long link_time, UNUSED_ARG(const char *numeric), const char *description) {
+AddServer(struct server *uplink, const char *name, int hops, unsigned long boot, unsigned long link_time, const char *numeric, const char *description) {
     struct server* sNode;
 
     sNode = calloc(1, sizeof(*sNode));
@@ -52,6 +70,7 @@ AddServer(struct server *uplink, const char *name, int hops, unsigned long boot,
     safestrncpy(sNode->name, name, sizeof(sNode->name));
     sNode->hops = hops;
     sNode->boot = boot;
+    safestrncpy(sNode->numeric, numeric, sizeof(sNode->numeric));
     sNode->link_time = link_time;
     sNode->users = dict_new();
     safestrncpy(sNode->description, description, sizeof(sNode->description));
@@ -60,7 +79,8 @@ AddServer(struct server *uplink, const char *name, int hops, unsigned long boot,
         /* uplink may be NULL if we're just building ourself */
         serverList_append(&sNode->uplink->children, sNode);
     }
-    dict_insert(servers, sNode->name, sNode);
+    /* DEBUG */ fprintf(stdout, "[SERVER ADD:[Numeric: %s]|[Name: %s]|[Uplink: %s]]\n", sNode->numeric, sNode->name, uplink);
+    dict_insert(servers, sNode->numeric, sNode);
 
     if (hops && !self->burst) {
         unsigned int n;
@@ -123,13 +143,13 @@ AddUser(struct server* uplink, const char *nick, const char *ident, const char *
         log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): server does not exist!", uplink, nick);
         return NULL;
     }
-
+    /* DEBUG */ printf("This user is on the %s server\n", uplink);
     dummy = modes && modes[0] == '*';
     if (dummy) {
         ++modes;
     } else if (!is_valid_nick(nick)) {
         log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): invalid nickname detected.", uplink, nick);
-        return NULL;
+        //return NULL;
     }
 
     if ((oldUser = GetUserH(nick))) {
@@ -160,7 +180,7 @@ AddUser(struct server* uplink, const char *nick, const char *ident, const char *
     if (++uNode->uplink->clients > uNode->uplink->max_clients) {
         uNode->uplink->max_clients = uNode->uplink->clients;
     }
-
+    /* DEBUG */ printf("Adding %s to clients dictionary from server %s!\n", uNode->nick, uNode->uplink);
     dict_insert(clients, uNode->nick, uNode);
     if (dict_size(clients) > max_clients) {
         max_clients = dict_size(clients);
@@ -184,7 +204,7 @@ AddLocalUser(const char *nick, const char *ident, const char *hostname, const ch
     static const irc_in_addr_t ipaddr;
 
     if (!modes)
-        modes = "+oikr";
+        modes = "+Sio";
     if (old_user) {
         if (IsLocal(old_user))
             return old_user;
@@ -309,7 +329,6 @@ irc_svinfo() {
 void
 irc_introduce(const char *passwd, const char *sid) {
     extern unsigned long burst_begin;
-
     irc_pass(passwd, sid);
     irc_capab();
     irc_server(self);
@@ -321,12 +340,13 @@ irc_introduce(const char *passwd, const char *sid) {
 
 void
 irc_ping(const char *something) {
-    putsock("PING :%s", something);
+    putsock("PING %s", something);
 }
 
 void
 irc_pong(const char *who, const char *data) {
-    putsock(":%s PONG %s :%s", self->name, who, data);
+    putsock("PONG %s", self->uplink);
+    /* DEBUG */ //fprintf(stdout, "PONG %s\n", self->uplink);
 }
 
 void
@@ -656,7 +676,24 @@ static CMD_FUNC(cmd_capab) {
         { "UNCONNECT", CAPAB_UNCONNECT },
         { "NICKIP", CAPAB_NICKIP },
         { "TSMODE", CAPAB_TSMODE },
+        { "QS", CAPAB_QS },
+        { "EX", CAPAB_EX },
+        { "CHW", CAPAB_CHW },
+        { "IE", CAPAB_IE },
+        { "KLN", CAPAB_KLN },
+        { "KNOCK", CAPAB_KLN },
         { "ZIP", CAPAB_ZIP },
+        { "TB", CAPAB_TB },
+        { "UNKLN", CAPAB_UNKLN },
+        { "CLUSTER", CAPAB_CLUSTER },
+        { "ENCAP", CAPAB_ENCAP },
+        { "SERVICES", CAPAB_SERVICES },
+        { "RSFNC", CAPAB_RSFNC },
+        { "SAVE", CAPAB_SAVE },
+        { "EUID", CAPAB_EUID },
+        { "EOPMOD", CAPAB_EOPMOD },
+        { "BAN", CAPAB_BAN },
+        { "MLOCK", CAPAB_MLOCK },
         { NULL, 0 }
     };
     unsigned int nn, mm;
@@ -751,20 +788,28 @@ static void send_burst() {
     putsock("BURST 0");
 }
 
+/* struct server* uplink, const char *name, int hops, unsigned long boot, unsigned long link, const char *numeric, const char *description */
+
 static CMD_FUNC(cmd_server) {
+    /* In TS6 land, SERVER only registers the server. It doesn't actually introduce it. */
+}
+
+static CMD_FUNC(cmd_sid) {
+    /* DEBUG */ fprintf(stdout, "INT CMD_SID!\n");
     if (argc < 4) return 0;
     if (origin) {
-        AddServer(GetServerH(origin), argv[1], atoi(argv[2]), 0, now, 0, argv[3]);
+        /* DEBUG */ //fprintf(stdout, "Adding server!!! %s %s %d %d %lu %s %s\n", origin, argv[1], atoi(argv[2]), 0, now, argv[3], argv[4]);
+        AddServer(GetServerH(origin), argv[1], atoi(argv[2]), 0, now, argv[3], argv[4]);
     } else {
-        self->uplink = AddServer(self, argv[1], atoi(argv[2]), 0, now, 0, argv[3]);
+        self->uplink = AddServer(self, argv[1], atoi(argv[2]), 0, now, argv[3], argv[4]);
     }
     return 1;
 }
 
 static CMD_FUNC(cmd_svinfo) {
     if (argc < 5) return 0;
-    if ((atoi(argv[1]) < 3) || (atoi(argv[2]) > 3)) return 0;
-    /* TODO: something with the timestamp we get from the other guy */
+    if ((atoi(argv[1]) < 6) || (atoi(argv[2]) > 6)) return 0;
+    //if ((atoi(argv[4])) - (unsigned long)now < 100 || (atoi(argv[4])) - (unsigned long)now > 100) return 0;
     send_burst();
     return 1;
 }
@@ -777,6 +822,13 @@ static CMD_FUNC(cmd_ping)
     timeq_add(now + ping_freq, timed_send_ping, 0);
     received_ping();
     return 1;
+}
+
+//struct server *uplink, const char *name, int hops, unsigned long boot, unsigned long link_time, const char *numeric, const char *description
+
+static CMD_FUNC(cmd_pass_uplink)
+{
+     AddServer(argv[4], "services.beta-srvx.net", 0, 0, now, argv[4], "Services for myself");
 }
 
 static CMD_FUNC(cmd_burst) {
@@ -808,6 +860,21 @@ static CMD_FUNC(cmd_nick) {
             ip.in6_32[3] = htonl(atoi(argv[9]));
         un = AddUser(GetServerH(argv[7]), argv[1], argv[5], argv[6], argv[4], argv[argc-1], atoi(argv[3]), ip, stamp);
     }
+    return 1;
+}
+
+/* struct server* uplink, const char *nick, const char *ident, const char *hostname, const char *modes, const char *userinfo, unsigned long timestamp, irc_in_addr_t realip, unsigned long stamp */
+static CMD_FUNC(cmd_euid) {
+    //struct UserNode *un;
+    char serverid[10];
+    strncpy(serverid, argv[8], 3);
+    //unsigned long stamp;
+    irc_in_addr_t ip;
+    //stamp = strtoul(argv[3], NULL, 0);
+    if (argc > 10)
+        ip.in6_32[3] = htonl(atoi(argv[9]));
+    /* DEBUG */ //printf("the server host I see is %s\n", serverid);
+    AddUser(GetServerH(serverid), argv[1], argv[5], argv[6], argv[4], argv[11], atoi(argv[3]), ip, 0);
     return 1;
 }
 
@@ -858,6 +925,7 @@ static CMD_FUNC(cmd_sjoin) {
     }
     return 1;
 }
+
 
 static CMD_FUNC(cmd_mode) {
     struct userNode *un;
@@ -1048,7 +1116,7 @@ void parse_cleanup(void) {
 }
 
 void init_parse(void) {
-    const char *str, *desc;
+    const char *str, *desc, *selfsid;
 
     str = conf_get_data("server/ping_freq", RECDB_QSTRING);
     ping_freq = str ? ParseInterval(str) : 120;
@@ -1056,11 +1124,15 @@ void init_parse(void) {
     ping_timeout = str ? ParseInterval(str) : 30;
     str = conf_get_data("server/hostname", RECDB_QSTRING);
     desc = conf_get_data("server/description", RECDB_QSTRING);
+    selfsid = conf_get_data("server/sid", RECDB_QSTRING);
+    if (!selfsid) {
+        log_module(MAIN_LOG, LOG_ERROR, "No SID entry in config file. (Required for TS6)");
+    }
     if (!str || !desc) {
         log_module(MAIN_LOG, LOG_ERROR, "No server/hostname entry in config file.");
         exit(1);
     }
-    self = AddServer(NULL, str, 0, boot_time, now, NULL, desc);
+    self = AddServer(NULL, str, 0, boot_time, now, selfsid, desc);
 
     str = conf_get_data("server/ping_freq", RECDB_QSTRING);
     ping_freq = str ? ParseInterval(str) : 120;
@@ -1075,6 +1147,7 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "BURST", cmd_burst);
     dict_insert(irc_func_dict, "CAPAB", cmd_capab);
     dict_insert(irc_func_dict, "ERROR", cmd_error);
+    dict_insert(irc_func_dict, "EUID", cmd_euid);
     dict_insert(irc_func_dict, "GNOTICE", cmd_dummy);
     dict_insert(irc_func_dict, "INVITE", cmd_dummy);
     dict_insert(irc_func_dict, "KICK", cmd_kick);
@@ -1085,11 +1158,13 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "NOTICE", cmd_notice);
     dict_insert(irc_func_dict, "PART", cmd_part);
     dict_insert(irc_func_dict, "PASS", cmd_pass);
+    dict_insert(irc_func_dict, "PASS", cmd_pass_uplink);
     dict_insert(irc_func_dict, "PING", cmd_ping);
     dict_insert(irc_func_dict, "PONG", cmd_pong);
     dict_insert(irc_func_dict, "PRIVMSG", cmd_privmsg);
     dict_insert(irc_func_dict, "QUIT", cmd_quit);
     dict_insert(irc_func_dict, "SERVER", cmd_server);
+    dict_insert(irc_func_dict, "SID", cmd_sid);
     dict_insert(irc_func_dict, "SJOIN", cmd_sjoin);
     dict_insert(irc_func_dict, "SQUIT", cmd_squit);
     dict_insert(irc_func_dict, "STATS", cmd_stats);
@@ -1098,6 +1173,7 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "TOPIC", cmd_topic);
     dict_insert(irc_func_dict, "VERSION", cmd_version);
     dict_insert(irc_func_dict, "WHOIS", cmd_whois);
+    dict_insert(irc_func_dict, "QS", NULL);
     dict_insert(irc_func_dict, "331", cmd_num_topic);
     dict_insert(irc_func_dict, "332", cmd_num_topic);
     dict_insert(irc_func_dict, "333", cmd_num_topic);
@@ -1112,9 +1188,10 @@ int parse_line(char *line, int recursive) {
     char *argv[MAXNUMPARAMS];
     int argc, cmd, res;
     cmd_func_t *func;
-
+    /* DEBUG */ printf("[RECEIVED] %s\n", line);
     argc = split_line(line, true, ArrayLength(argv), argv);
     cmd = line[0] == ':';
+    /* DEBUG */ //fprintf(stdout, "command I see is %s\n", argv[cmd]);
     if ((argc > cmd) && (func = dict_find(irc_func_dict, argv[cmd], NULL))) {
         char *origin;
         if (cmd) {
@@ -1125,6 +1202,7 @@ int parse_line(char *line, int recursive) {
             origin = NULL;
         }
         res = func(origin, argc-cmd, argv+cmd);
+        /* DEBUG */ //fprintf(stdout, "origin is %s and the command is %d and res is %d\n", origin, cmd, res);
     } else {
         res = 0;
     }

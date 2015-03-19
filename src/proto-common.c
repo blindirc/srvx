@@ -319,7 +319,7 @@ static CMD_FUNC(cmd_pass)
     }
 
     cManager.uplink->state = BURSTING;
-    return 1;
+    return AddServer(argv[3][(strlen(argv[3])-3)], self->uplink->name, 0, 0, now, self->uplink->name, "");;
 }
 
 static CMD_FUNC(cmd_dummy)

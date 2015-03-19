@@ -113,6 +113,10 @@ struct userNode {
     char numeric[COMBO_NUMERIC_LEN+1];
     unsigned int num_local : 18;
 #endif
+#ifdef WITH_PROTOCOL_TS6
+    char numeric[SID_NUMERIC_LEN+1];
+    unsigned int num_local : 18;
+#endif
     unsigned int dead : 1;        /* Is user waiting to be recycled? */
     irc_in_addr_t ip;             /* User's IP address */
     long modes;                   /* user flags +isw etc... */
@@ -174,14 +178,17 @@ struct server {
     unsigned long boot;
     unsigned long link_time;
     char description[SERVERDESCRIPTMAX+1];
+    char numeric[SID_NUMERIC_LEN+1];
 #ifdef WITH_PROTOCOL_P10
     char numeric[COMBO_NUMERIC_LEN+1];
+    unsigned int num_mask;
+#elif WITH_PROTOCOL_TS6
     unsigned int num_mask;
 #endif
     unsigned int hops, clients, max_clients;
     unsigned int burst : 1, self_burst : 1;
     struct server *uplink;
-#ifdef WITH_PROTOCOL_P10
+#if defined(WITH_PROTOCOL_P10) || defined(WITH_PROTOCOL_TS6)
     struct userNode **users; /* flat indexed by numeric */
 #else
     dict_t users; /* indexed by nick */
