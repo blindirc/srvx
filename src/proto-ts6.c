@@ -34,7 +34,6 @@
 #define CAPAB_IE        0x800
 #define CAPAB_KLN       0x1000
 #define CAPAB_KNOCK     0x2000
-//#define CAPAB_ZIP       0x4000
 #define CAPAB_TB        0x8000
 #define CAPAB_UNKLN     0x10000
 #define CAPAB_CLUSTER   0x12000
@@ -57,9 +56,33 @@ static int uplink_capab;
 static void privmsg_user_helper(struct userNode *un, void *data);
 
 /* These correspond to 1 << X:      012345678901234567 */
-const char irc_user_mode_chars[] = "o iw dkg      r   ";
+const char irc_user_mode_chars[] = "o iw dSg      r   ";
+
+static struct userNode *AddUser(struct server* uplink, const char *nick, const char *ident, const char *hostname, const char *modes, const char *numeric, const char *userinfo, unsigned long timestamp, const char *realip);
 
 void irc_svsmode(struct userNode *target, char *modes, unsigned long stamp);
+
+static int
+get_local_numeric(void)
+{
+    static unsigned int next_numeric = 0;
+    if (self->clients > self->num_mask)
+        return -1;
+    while (self->users[next_numeric])
+        if (++next_numeric > self->num_mask)
+            next_numeric = 0;
+    /* I'm a cheater. */
+    return ++next_numeric;
+}
+
+static void
+make_numeric(struct server *svr, int local_num, char *outbuf)
+{
+    /* Hard coding here is fine since TS6 is picky */
+    strncpy(outbuf, svr->numeric, 3);
+    inttobase64(outbuf+3, local_num, 6);
+    outbuf[9] = 0;
+}
 
 struct server *
 AddServer(struct server *uplink, const char *name, int hops, unsigned long boot, unsigned long link_time, const char *numeric, const char *description) {
@@ -68,6 +91,7 @@ AddServer(struct server *uplink, const char *name, int hops, unsigned long boot,
     sNode = calloc(1, sizeof(*sNode));
     sNode->uplink = uplink;
     safestrncpy(sNode->name, name, sizeof(sNode->name));
+    sNode->num_mask = base64toint(numeric+1, 2);
     sNode->hops = hops;
     sNode->boot = boot;
     safestrncpy(sNode->numeric, numeric, sizeof(sNode->numeric));
@@ -94,7 +118,7 @@ AddServer(struct server *uplink, const char *name, int hops, unsigned long boot,
 
 void
 DelServer(struct server* serv, int announce, const char *message) {
-    unsigned int nn;
+   /* unsigned int nn;
     dict_iterator_t it, next;
 
     if (!serv) return;
@@ -115,7 +139,7 @@ DelServer(struct server* serv, int announce, const char *message) {
     dict_remove(servers, serv->name);
     serverList_clean(&serv->children);
     dict_delete(serv->users);
-    free(serv);
+    free(serv);*/
 }
 
 int
@@ -134,71 +158,103 @@ is_valid_nick(const char *nick) {
     return 1;
 }
 
-struct userNode *
-AddUser(struct server* uplink, const char *nick, const char *ident, const char *hostname, const char *modes, const char *userinfo, unsigned long timestamp, irc_in_addr_t realip, unsigned long stamp) {
-    struct userNode *uNode, *oldUser;
-    unsigned int nn, dummy;
+static struct userNode*
+AddUser(struct server* uplink, const char *nick, const char *ident, const char *hostname, const char *modes, const char *numeric, const char *userinfo, unsigned long timestamp, const char *realip)
+{
+    struct userNode *oldUser, *uNode;
+    unsigned int n, ignore_user, dummy;
 
-    if (!uplink) {
-        log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): server does not exist!", uplink, nick);
+    if ((strlen(numeric) != 9)) {
+        log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): numeric %s wrong length!", (void*)uplink, nick, numeric);
         return NULL;
     }
-    /* DEBUG */ printf("This user is on the %s server\n", uplink);
+
+    if (!uplink) {
+        log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): server for numeric %s doesn't exist!", (void*)uplink, nick, numeric);
+        return NULL;
+    }
+
+    /*if (uplink != GetServerN(numeric)) {
+        log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): server for numeric %s differs from nominal uplink %s.", (void*)uplink, nick, numeric, uplink->name);
+        return NULL;
+    }*/
+
     dummy = modes && modes[0] == '*';
     if (dummy) {
         ++modes;
     } else if (!is_valid_nick(nick)) {
-        log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): invalid nickname detected.", uplink, nick);
-        //return NULL;
+        log_module(MAIN_LOG, LOG_WARNING, "AddUser(%p, %s, ...): invalid nickname detected.", (void*)uplink, nick);
+        return NULL;
     }
 
+    ignore_user = 0;
     if ((oldUser = GetUserH(nick))) {
-        if (IsLocal(oldUser) && IsService(oldUser)) {
-            /* The service should collide the new user off. */
+        if (IsLocal(oldUser)
+            && (IsService(oldUser) || IsPersistent(oldUser))) {
+            /* The service should collide the new user off - but not
+             * if the new user is coming in during a burst.  (During a
+             * burst, the bursting server will kill either our user --
+             * triggering a ReintroduceUser() -- or its own.)
+             */
             oldUser->timestamp = timestamp - 1;
-            irc_user(oldUser);
-        }
-        if (oldUser->timestamp > timestamp) {
-            /* "Old" user is really newer; remove them */
+            ignore_user = 1;
+            if (!uplink->burst) {
+                printf("INTRODUCING AN OLD USER %s\n", oldUser);
+                irc_user(oldUser);
+            }
+        } else if (oldUser->timestamp > timestamp) {
+            /* "Old" user is really newer; remove them. */
             DelUser(oldUser, 0, 1, "Overruled by older nick");
         } else {
-            /* User being added is too new */
-            return NULL;
+            /* User being added is too new; do not add them to
+             * clients, but do add them to the server's list, since it
+             * will send a KILL and QUIT soon. */
+            ignore_user = 1;
         }
     }
 
+    /* create new usernode and set all values */
     uNode = calloc(1, sizeof(*uNode));
     uNode->nick = strdup(nick);
     safestrncpy(uNode->ident, ident, sizeof(uNode->ident));
     safestrncpy(uNode->info, userinfo, sizeof(uNode->info));
     safestrncpy(uNode->hostname, hostname, sizeof(uNode->hostname));
-    uNode->ip = realip;
+    safestrncpy(uNode->numeric, numeric, sizeof(uNode->numeric));
+    //irc_p10_pton(&uNode->ip, realip);
     uNode->timestamp = timestamp;
+    uNode->idle_since = timestamp;
     modeList_init(&uNode->channels);
     uNode->uplink = uplink;
-    dict_insert(uplink->users, uNode->nick, uNode);
     if (++uNode->uplink->clients > uNode->uplink->max_clients) {
         uNode->uplink->max_clients = uNode->uplink->clients;
     }
-    /* DEBUG */ printf("Adding %s to clients dictionary from server %s!\n", uNode->nick, uNode->uplink);
-    dict_insert(clients, uNode->nick, uNode);
+    uNode->num_local = base64toint(numeric+strlen(uNode->uplink->numeric), 3) & uNode->uplink->num_mask;
+    uNode->uplink->users[uNode->num_local] = uNode;
+    mod_usermode(uNode, modes);
+    if (dummy)
+        uNode->modes |= FLAGS_DUMMY;
+    if (ignore_user)
+        return uNode;
+
+    printf("[DEBUG] Adding new client! %s %s %s\n", uNode->nick, uNode->numeric, modes);
+    dict_insert(cnicks, uNode->nick, uNode);
+    dict_insert(clients, uNode->numeric, uNode);
     if (dict_size(clients) > max_clients) {
         max_clients = dict_size(clients);
         max_clients_time = now;
     }
-
-    mod_usermode(uNode, modes);
-    if (dummy) uNode->modes |= FLAGS_DUMMY;
-    if (stamp) call_account_func(uNode, NULL, 0, stamp);
-    if (IsLocal(uNode)) irc_user(uNode);
-    for (nn=0; (nn<nuf_used) && !uNode->dead; nn++)
-        nuf_list[nn](uNode);
+    if (IsLocal(uNode))
+        irc_user(uNode);
+    for (n=0; (n<nuf_used) && !uNode->dead; n++)
+        nuf_list[n](uNode);
     return uNode;
 }
 
 struct userNode *
 AddLocalUser(const char *nick, const char *ident, const char *hostname, const char *desc, const char *modes)
 {
+    char numeric[UID_NUMERIC_LEN+1];
+    int local_num = get_local_numeric();
     unsigned long timestamp = now;
     struct userNode *old_user = GetUserH(nick);
     static const irc_in_addr_t ipaddr;
@@ -210,9 +266,15 @@ AddLocalUser(const char *nick, const char *ident, const char *hostname, const ch
             return old_user;
         timestamp = old_user->timestamp - 1;
     }
+    if (local_num == -1) {
+        log_module(MAIN_LOG, LOG_ERROR, "Unable to find SID for service %s", nick);
+        printf("[DEBUG] %s %s %s %s %lu\n", nick, ident, modes, desc, timestamp);
+        return 0;
+    }
     if (!hostname)
         hostname = self->name;
-    return AddUser(self, nick, ident, hostname, modes, desc, timestamp, ipaddr, 0);
+    make_numeric(self, local_num, numeric);
+    return AddUser(self, nick, ident, hostname, modes, numeric, desc, timestamp, "255.255.255.255");
 }
 
 void
@@ -256,20 +318,20 @@ void
 irc_server(struct server *srv) {
     if (srv == self) {
         putsock("SERVER %s %d :%s", srv->name, srv->hops, srv->description);
-    } else {
+    }/* else {
         putsock(":%s SERVER %s %d :%s", self->name, srv->name, srv->hops, srv->description);
-    }
+        printf("else :%s SERVER %s %d :%s\n", self->name, srv->name, srv->hops, srv->description);
+    }*/
 }
 
 void
 irc_user(struct userNode *user) {
     char modes[32];
-    if (!user || user->nick[0] != ' ') return;
+    if (!user) return;
     irc_user_modes(user, modes, sizeof(modes));
-    putsock("NICK %s %d %lu +%s %s %s %s %d %u :%s",
-            user->nick, user->uplink->hops+2, (unsigned long)user->timestamp,
-            modes, user->ident, user->hostname, user->uplink->name, 0,
-            ntohl(user->ip.in6_32[3]), user->info);
+    putsock(":%s EUID %s %d %lu +%s %s %s %s %s * * :%s",
+            user->uplink->numeric, user->nick, user->uplink->hops+2, (unsigned long)user->timestamp,
+            modes, user->ident, user->hostname, user->uplink->name, user->numeric, user->info);
 }
 
 void
@@ -355,18 +417,27 @@ irc_quit(struct userNode *user, const char *message) {
 }
 
 void
-irc_squit(struct server *srv, const char *message, const char *service_message) {
-    if (!service_message) service_message = message;
-    /* If we're leaving the network, QUIT all our clients. */
-    if ((srv == self) && (cManager.uplink->state == CONNECTED)) {
-        dict_iterator_t it;
-        for (it = dict_first(srv->users); it; it = iter_next(it)) {
-            irc_quit(iter_data(it), service_message);
+irc_squit(struct server *srv, const char *message, const char *service_message)
+{
+    if (!service_message)
+        service_message = message;
+
+    /* Are we leaving the network? */
+    if (srv == self && cManager.uplink->state == CONNECTED) {
+        unsigned int i;
+
+        /* Quit all clients linked to me. */
+        for (i = 0; i <= self->num_mask; i++) {
+            if (!self->users[i])
+                continue;
+            irc_quit(self->users[i], service_message);
         }
     }
-    putsock(":%s SQUIT %s 0 :%s", self->name, srv->name, message);
+
+    putsock(":%s SQUIT %s 0 :%s", self->numeric, srv->name, message);
+
     if (srv == self) {
-        /* Reconnect to the currently selected server. */
+        /* Force a reconnect to the currently selected server. */
         cManager.uplink->tries = 0;
         log_module(MAIN_LOG, LOG_INFO, "Squitting from uplink: %s", message);
         close_socket();
@@ -425,9 +496,11 @@ irc_wallchops(UNUSED_ARG(struct userNode *from), UNUSED_ARG(const char *to), UNU
 void
 irc_join(struct userNode *who, struct chanNode *what) {
     if (what->members.used == 1) {
-        putsock(":%s SJOIN %lu %s + :@%s", self->name, (unsigned long)what->timestamp, what->name, who->nick);
+        putsock(":%s SJOIN %lu %s + :@%s", self->numeric, (unsigned long)what->timestamp, what->name, who->numeric);
+        printf("[nott]:%s SJOIN %lu %s + :@%s\n", self->numeric, (unsigned long)what->timestamp, what->name, who->numeric);
     } else {
-        putsock(":%s SJOIN %lu %s", who->nick, (unsigned long)what->timestamp, what->name);
+        putsock(":%s SJOIN %lu %s + :@%s", self->numeric, (unsigned long)what->timestamp, what->name, who->numeric);
+        printf("[else]:%s SJOIN %lu %s + :@%s\n", self->numeric, (unsigned long)what->timestamp, what->name, who->numeric);
     }
 }
 
@@ -438,16 +511,16 @@ irc_invite(struct userNode *from, struct userNode *who, struct chanNode *to) {
 
 void
 irc_mode(struct userNode *who, struct chanNode *target, const char *modes) {
-    putsock(":%s MODE %s %lu %s", who->nick, target->name, (unsigned long)target->timestamp, modes);
+    putsock(":%s TMODE %lu %s %s", who->numeric, (unsigned long)target->timestamp, target->name, modes);
 }
 
 void
 irc_svsmode(struct userNode *target, char *modes, unsigned long stamp) {
     extern struct userNode *nickserv;
     if (stamp) {
-        putsock(":%s SVSMODE %s %lu %s %lu", nickserv->nick, target->nick, (unsigned long)target->timestamp, modes, stamp);
+        putsock(":%s SVSMODE %s %lu %s %lu", nickserv->numeric, target->numeric, (unsigned long)target->timestamp, modes, stamp);
     } else {
-        putsock(":%s SVSMODE %s %lu %s", nickserv->nick, target->nick, (unsigned long)target->timestamp, modes);
+        putsock(":%s SVSMODE %s %lu %s", nickserv->numeric, target->numeric, (unsigned long)target->timestamp, modes);
     }
 }
 
@@ -522,7 +595,7 @@ irc_error(const char *to, const char *message) {
     if (to) {
         putsock("%s ERROR :%s", to, message);
     } else {
-        putsock(":%s ERROR :%s", self->name, message);
+        putsock(":%s ERROR :%s", self->numeric, message);
     }
 }
 
@@ -531,7 +604,7 @@ irc_kill(struct userNode *from, struct userNode *target, const char *message) {
     if (from) {
         putsock(":%s KILL %s :%s!%s (%s)", from->nick, target->nick, self->name, from->nick, message);
     } else {
-        putsock(":%s KILL %s :%s (%s)", self->name, target->nick, self->name, message);
+        putsock(":%s KILL %s :%s (%s)", self->numeric, target->nick, self->numeric, message);
     }
 }
 
@@ -558,7 +631,7 @@ irc_numeric(struct userNode *user, unsigned int num, const char *format, ...) {
     va_start(arg_list, format);
     vsnprintf(buffer, MAXLEN-2, format, arg_list);
     buffer[MAXLEN-1] = 0;
-    putsock(":%s %03d %s %s", self->name, num, user->nick, buffer);
+    putsock(":%s %03d %s %s", self->numeric, num, user->numeric, buffer);
 }
 
 static void
@@ -590,13 +663,13 @@ parse_foreach(char *target_list, foreach_chanfunc cf, foreach_nonchan nc, foreac
                 user = GetUserH(strtok(target_list, "@"));
                 server = GetServerH(strtok(NULL, "@"));
 
-                if (user && (user->uplink != server)) {
-                    /* Don't attempt to index into any arrays
-                       using a user's numeric on another server. */
-                    user = NULL;
-                }
+             //   if (user && (user->uplink != server)) {
+             //       /* Don't attempt to index into any arrays
+             //          using a user's numeric on another server. */
+             //       user = NULL;
+             //   }
             } else {
-                user = GetUserH(target_list);
+                user = GetUserUID(target_list);
             }
 
             if (user) {
@@ -622,8 +695,8 @@ static CMD_FUNC(cmd_notice) {
 
 static CMD_FUNC(cmd_privmsg) {
     struct privmsg_desc pd;
-    if ((argc < 3) || !origin) return 0;
-    if (!(pd.user = GetUserH(origin))) return 1;
+    if ((argc < 2) || !origin) return 0;
+    if (!(pd.user = GetUserUID(origin))) return 1;
     if (IsGagged(pd.user) && !IsOper(pd.user)) return 1;
     pd.is_notice = 0;
     pd.text = argv[2];
@@ -637,11 +710,11 @@ static CMD_FUNC(cmd_whois) {
 
     if (argc < 3)
         return 0;
-    if (!(from = GetUserH(origin))) {
+    if (!(from = GetUserUID(origin))) {
         log_module(MAIN_LOG, LOG_ERROR, "Could not find WHOIS origin user %s", origin);
         return 0;
     }
-    if(!(who = GetUserH(argv[2]))) {
+    if(!(who = GetUserUID(argv[1]))) {
         irc_numeric(from, ERR_NOSUCHNICK, "%s@%s :No such nick", argv[2], self->name);
         return 1;
     }
@@ -717,14 +790,14 @@ static void burst_channel(struct chanNode *chan) {
 
     if (!chan->members.used) return;
     /* send list of users in the channel.. */
-    base_len = sprintf(line, ":%s SJOIN %lu %s ", self->name, (unsigned long)chan->timestamp, chan->name);
+    base_len = sprintf(line, ":%s SJOIN %lu %s ", self->numeric, (unsigned long)chan->timestamp, chan->name);
     len = irc_make_chanmode(chan, line+base_len);
     pos = base_len + len;
     line[pos++] = ' ';
     line[pos++] = ':';
     for (nn=0; nn<chan->members.used; nn++) {
         struct modeNode *mn = chan->members.list[nn];
-        len = strlen(mn->user->nick);
+        len = strlen(mn->user->numeric);
         if (pos + len > 500) {
             line[pos-1] = 0;
             putsock("%s", line);
@@ -735,15 +808,16 @@ static void burst_channel(struct chanNode *chan) {
         }
         if (mn->modes & MODE_CHANOP) line[pos++] = '@';
         if (mn->modes & MODE_VOICE) line[pos++] = '+';
-        memcpy(line+pos, mn->user->nick, len);
+        memcpy(line+pos, mn->user->numeric, len);
         pos = pos + len;
         line[pos++] = ' ';
     }
     /* print the last line */
     line[pos] = 0;
     putsock("%s", line);
+    printf("%s\n", line);
     /* now send the bans.. */
-    base_len = sprintf(line, ":%s MODE %lu %s +", self->name, (unsigned long)chan->timestamp, chan->name);
+    base_len = sprintf(line, ":%s MODE %lu %s +", self->numeric, (unsigned long)chan->timestamp, chan->name);
     pos = sizeof(line)-1;
     line[pos] = 0;
     for (nn=queued=0; nn<chan->banlist.used; nn++) {
@@ -788,14 +862,12 @@ static void send_burst() {
     putsock("BURST 0");
 }
 
-/* struct server* uplink, const char *name, int hops, unsigned long boot, unsigned long link, const char *numeric, const char *description */
-
 static CMD_FUNC(cmd_server) {
     /* In TS6 land, SERVER only registers the server. It doesn't actually introduce it. */
+    return 1;
 }
 
 static CMD_FUNC(cmd_sid) {
-    /* DEBUG */ fprintf(stdout, "INT CMD_SID!\n");
     if (argc < 4) return 0;
     if (origin) {
         /* DEBUG */ //fprintf(stdout, "Adding server!!! %s %s %d %d %lu %s %s\n", origin, argv[1], atoi(argv[2]), 0, now, argv[3], argv[4]);
@@ -816,7 +888,7 @@ static CMD_FUNC(cmd_svinfo) {
 
 static CMD_FUNC(cmd_ping)
 {
-    irc_pong(self->name, argc > 1 ? argv[1] : origin);
+    irc_pong(self->numeric, argc > 1 ? argv[1] : origin);
     timeq_del(0, timed_send_ping, 0, TIMEQ_IGNORE_WHEN|TIMEQ_IGNORE_DATA);
     timeq_del(0, timed_ping_timeout, 0, TIMEQ_IGNORE_WHEN|TIMEQ_IGNORE_DATA);
     timeq_add(now + ping_freq, timed_send_ping, 0);
@@ -824,11 +896,9 @@ static CMD_FUNC(cmd_ping)
     return 1;
 }
 
-//struct server *uplink, const char *name, int hops, unsigned long boot, unsigned long link_time, const char *numeric, const char *description
-
 static CMD_FUNC(cmd_pass_uplink)
 {
-     AddServer(argv[4], "services.beta-srvx.net", 0, 0, now, argv[4], "Services for myself");
+     AddServer(argv[4], "", 0, 0, now, argv[4], "");
 }
 
 static CMD_FUNC(cmd_burst) {
@@ -858,23 +928,22 @@ static CMD_FUNC(cmd_nick) {
         stamp = strtoul(argv[8], NULL, 0);
         if (argc > 10)
             ip.in6_32[3] = htonl(atoi(argv[9]));
-        un = AddUser(GetServerH(argv[7]), argv[1], argv[5], argv[6], argv[4], argv[argc-1], atoi(argv[3]), ip, stamp);
+        //un = AddUser(GetServerH(argv[7]), argv[1], argv[5], argv[6], argv[4], argv[argc-1], atoi(argv[3]), ip, stamp);
     }
     return 1;
 }
 
-/* struct server* uplink, const char *nick, const char *ident, const char *hostname, const char *modes, const char *userinfo, unsigned long timestamp, irc_in_addr_t realip, unsigned long stamp */
 static CMD_FUNC(cmd_euid) {
-    //struct UserNode *un;
+    struct UserNode *un;
     char serverid[10];
     strncpy(serverid, argv[8], 3);
     //unsigned long stamp;
     irc_in_addr_t ip;
     //stamp = strtoul(argv[3], NULL, 0);
-    if (argc > 10)
-        ip.in6_32[3] = htonl(atoi(argv[9]));
-    /* DEBUG */ //printf("the server host I see is %s\n", serverid);
-    AddUser(GetServerH(serverid), argv[1], argv[5], argv[6], argv[4], argv[11], atoi(argv[3]), ip, 0);
+    //if (argc > 10)
+    //    ip.in6_32[3] = htonl(atoi(argv[9]));
+    /* DEBUG */ printf("[EUID RECV] %s %s %s %s %s %s %lu %s\n", argv[1], argv[5], argv[6], argv[4], argv[8], argv[11], atoi(argv[3]), argv[7]);
+    AddUser(GetServerH(serverid), argv[1], argv[5], argv[6], argv[4], argv[8], argv[11], atoi(argv[3]), argv[7]);
     return 1;
 }
 
@@ -885,7 +954,7 @@ static CMD_FUNC(cmd_sjoin) {
     unsigned int next = 4, last;
     char *nick, *nickend;
 
-    if ((argc == 3) && (uNode = GetUserH(origin))) {
+    if ((argc == 3) && (uNode = GetUserUID(origin))) {
         /* normal JOIN */
         if (!(cNode = GetChannel(argv[2]))) {
             log_module(MAIN_LOG, LOG_ERROR, "Unable to find SJOIN target %s", argv[2]);
@@ -919,7 +988,7 @@ static CMD_FUNC(cmd_sjoin) {
         *nickend = 0;
         if (*nick == '@') { mode |= MODE_CHANOP; nick++; }
         if (*nick == '+') { mode |= MODE_VOICE; nick++; }
-        if ((uNode = GetUserH(nick)) && (mNode = AddChannelUser(uNode, cNode))) {
+        if ((uNode = GetUserUID(nick)) && (mNode = AddChannelUser(uNode, cNode))) {
             mNode->modes = mode;
         }
     }
@@ -942,7 +1011,7 @@ static CMD_FUNC(cmd_mode) {
             return 0;
         }
 
-        if ((un = GetUserH(origin))) {
+        if ((un = GetUserUID(origin))) {
             /* Update idle time for the user */
             if ((mn = GetUserMode(cn, un)))
                 mn->idle_since = now;
@@ -952,12 +1021,40 @@ static CMD_FUNC(cmd_mode) {
         }
 
         return mod_chanmode(un, cn, argv+3, argc-3, MCP_ALLOW_OVB|MCP_FROM_SERVER|MC_ANNOUNCE);
-    } else if ((un = GetUserH(argv[1]))) {
+    } else if ((un = GetUserUID(argv[1]))) {
         mod_usermode(un, argv[2]);
         return 1;
     } else {
         log_module(MAIN_LOG, LOG_ERROR, "Not sure what MODE %s is affecting (not a channel name and no such user)", argv[1]);
         return 0;
+    }
+}
+
+static CMD_FUNC(cmd_tmode) {
+    struct userNode *un;
+
+    if (argc < 2) {
+        log_module(MAIN_LOG, LOG_ERROR, "Illegal MODE from %s (no arguments).", origin);
+        return 0;
+    } else if (IsChannelName(argv[2])) {
+        struct chanNode *cn;
+        struct modeNode *mn;
+
+        if (!(cn = GetChannel(argv[2]))) {
+            log_module(MAIN_LOG, LOG_ERROR, "Unable to find channel %s whose mode is changing", argv[2]);
+            return 0;
+        }
+
+        if ((un = GetUserUID(origin))) {
+            /* Update idle time for the user */
+            if ((mn = GetUserMode(cn, un)))
+                mn->idle_since = now;
+        } else {
+            /* Must be a server in burst or something.  Make sure we're using the right timestamp. */
+            cn->timestamp = atoi(argv[1]);
+        }
+
+        return mod_chanmode(un, cn, argv+3, argc-3, MCP_ALLOW_OVB|MCP_FROM_SERVER|MC_ANNOUNCE);
     }
 }
 
@@ -982,7 +1079,7 @@ static CMD_FUNC(cmd_topic) {
 static CMD_FUNC(cmd_away) {
     struct userNode *un;
 
-    if (!(un = GetUserH(origin))) {
+    if (!(un = GetUserUID(origin))) {
         log_module(MAIN_LOG, LOG_ERROR, "Unable to find user %s sending AWAY", origin);
         return 0;
     }
@@ -1003,22 +1100,18 @@ static CMD_FUNC(cmd_kick) {
 static CMD_FUNC(cmd_kill) {
     struct userNode *user;
     if (argc < 3) return 0;
-    if (!(user = GetUserH(argv[1]))) {
+    if (!(user = GetUserUID(argv[1]))) {
         log_module(MAIN_LOG, LOG_ERROR, "Unable to find kill victim %s", argv[1]);
         return 0;
     }
-    if (IsLocal(user) && IsService(user)) {
-        ReintroduceUser(user);
-    } else {
-        DelUser(user, GetUserH(origin), false, ((argc >= 3) ? argv[2] : NULL));
-    }
+    DelUser(user, GetUserUID(origin), false, ((argc >= 3) ? argv[2] : NULL));
     return 1;
 }
 
 static CMD_FUNC(cmd_pong)
 {
     if (argc < 3) return 0;
-    if (!strcmp(argv[2], self->name)) {
+    if (!strcmp(argv[2], self->numeric)) {
         timeq_del(0, timed_send_ping, 0, TIMEQ_IGNORE_WHEN|TIMEQ_IGNORE_DATA);
         timeq_del(0, timed_ping_timeout, 0, TIMEQ_IGNORE_WHEN|TIMEQ_IGNORE_DATA);
         timeq_add(now + ping_freq, timed_send_ping, 0);
@@ -1069,7 +1162,7 @@ static CMD_FUNC(cmd_quit)
     if (argc < 2) return 0;
     /* Sometimes we get a KILL then a QUIT or the like, so we don't want to
      * call DelUser unless we have the user in our grasp. */
-    if ((user = GetUserH(origin))) {
+    if ((user = GetUserUID(origin))) {
         DelUser(user, NULL, false, argv[1]);
     }
     return 1;
@@ -1091,6 +1184,34 @@ static CMD_FUNC(cmd_squit)
     }
 
     DelServer(server, 0, argv[3]);
+    return 1;
+}
+
+static CMD_FUNC(cmd_num_unknown_mode)
+{
+    log_module(MAIN_LOG, LOG_WARNING, "An error has occured: Affected user: %s Mode received %s", argv[1], argv[2]);
+    return 1;
+}
+
+static CMD_FUNC(cmd_num_illegle_chan)
+{
+    /* Illegle channel name, we don't care */
+    return 1;
+}
+
+static CMD_FUNC(cmd_num_collision)
+{
+    struct userNode *user;
+    if (argc < 3) return 0;
+    if (!(user = GetUserUID(argv[1]))) {
+        log_module(MAIN_LOG, LOG_ERROR, "Unable to find kill victim %s", argv[1]);
+        return 0;
+    }
+    if (IsLocal(user) && IsService(user)) {
+        ReintroduceUser(user);
+    } else {
+        DelUser(user, GetUserUID(origin), false, ((argc >= 3) ? argv[2] : NULL));
+    }
     return 1;
 }
 
@@ -1154,6 +1275,7 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "KILL", cmd_kill);
     dict_insert(irc_func_dict, "LUSERSLOCK", cmd_dummy);
     dict_insert(irc_func_dict, "MODE", cmd_mode);
+    dict_insert(irc_func_dict, "TMODE", cmd_tmode);
     dict_insert(irc_func_dict, "NICK", cmd_nick);
     dict_insert(irc_func_dict, "NOTICE", cmd_notice);
     dict_insert(irc_func_dict, "PART", cmd_part);
@@ -1178,6 +1300,9 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "332", cmd_num_topic);
     dict_insert(irc_func_dict, "333", cmd_num_topic);
     dict_insert(irc_func_dict, "413", cmd_num_topic);
+    dict_insert(irc_func_dict, "436", cmd_num_collision);
+    dict_insert(irc_func_dict, "472", cmd_num_unknown_mode);
+    dict_insert(irc_func_dict, "479", cmd_num_illegle_chan);
 
     userList_init(&dead_users);
     reg_exit_func(parse_cleanup);
@@ -1301,7 +1426,7 @@ void mod_usermode(struct userNode *user, const char *mode_change) {
         case 'w': do_user_mode(FLAGS_WALLOP); break;
         case 'd': do_user_mode(FLAGS_DEAF); break;
         case 'r': do_user_mode(FLAGS_REGNICK); break;
-        case 'k': do_user_mode(FLAGS_SERVICE); break;
+        case 'S': do_user_mode(FLAGS_SERVICE); break;
         case 'g': do_user_mode(FLAGS_GLOBAL); break;
         }
 #undef do_user_mode

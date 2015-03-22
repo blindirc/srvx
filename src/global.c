@@ -546,7 +546,7 @@ static GLOBAL_FUNC(cmd_messages)
 static void
 global_process_user(struct userNode *user)
 {
-    if(IsLocal(user) || self->uplink->burst || user->uplink->burst)
+    if(1 == 1)
         return;
     send_messages(user, MESSAGE_RECIPIENT_LUSERS, 1);
 

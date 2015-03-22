@@ -27,8 +27,9 @@
  * which has much nicer interfaces that hide most of the ugly
  * differences between protocol dialects. */
 
-#define COMBO_NUMERIC_LEN   5   /* 1/2, 1/3 or 2/3 digits for server/client parts */
-#define SID_NUMERIC_LEN     9
+#define COMBO_NUMERIC_LEN   5     /* 1/2, 1/3 or 2/3 digits for server/client parts */
+#define UID_NUMERIC_LEN     9     /* EUIDs are the first 3 of the host's SID and then 6 gen'd chars */
+#define SID_NUMERIC_LEN     3     /* All TS6 servers require 3 chars for the SID */
 #define MAXLEN              512   /* Maximum IRC line length */
 #define MAXNUMPARAMS        200
 #define ALLCHANMSG_FUNCS_MAX  4 /* +1 == 5 potential 'allchanmsg' funcs */

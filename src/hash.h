@@ -110,11 +110,11 @@ struct userNode {
     char fakehost[HOSTLEN + 1];   /* Assigned fake host */
     char fakeident[USERLEN + 1];  /* Assigned fake ident */
 #ifdef WITH_PROTOCOL_P10
-    char numeric[COMBO_NUMERIC_LEN+1];
+    char *numeric[COMBO_NUMERIC_LEN+1];
     unsigned int num_local : 18;
 #endif
 #ifdef WITH_PROTOCOL_TS6
-    char numeric[SID_NUMERIC_LEN+1];
+    char *numeric[UID_NUMERIC_LEN+1];
     unsigned int num_local : 18;
 #endif
     unsigned int dead : 1;        /* Is user waiting to be recycled? */
@@ -178,11 +178,11 @@ struct server {
     unsigned long boot;
     unsigned long link_time;
     char description[SERVERDESCRIPTMAX+1];
-    char numeric[SID_NUMERIC_LEN+1];
 #ifdef WITH_PROTOCOL_P10
     char numeric[COMBO_NUMERIC_LEN+1];
     unsigned int num_mask;
 #elif WITH_PROTOCOL_TS6
+    char numeric[UID_NUMERIC_LEN+1];
     unsigned int num_mask;
 #endif
     unsigned int hops, clients, max_clients;
@@ -199,6 +199,7 @@ struct server {
 extern struct server *self;
 extern dict_t channels;
 extern dict_t clients;
+extern dict_t cnicks;
 extern dict_t servers;
 extern unsigned int max_clients, invis_clients;
 extern unsigned long max_clients_time;
@@ -206,6 +207,7 @@ extern struct userList curr_opers, curr_helpers;
 
 struct server* GetServerH(const char *name); /* using full name */
 struct userNode* GetUserH(const char *nick);   /* using nick */
+struct userNode* GetUserUID(const char *numeric); /* using UID's (TS6) */
 struct chanNode* GetChannel(const char *name);
 struct modeNode* GetUserMode(struct chanNode* channel, struct userNode* user);
 

@@ -25,6 +25,7 @@
 
 struct server *self;
 dict_t channels;
+dict_t cnicks;
 dict_t clients;
 dict_t servers;
 unsigned int max_clients, invis_clients;
@@ -36,6 +37,7 @@ static void hash_cleanup(void);
 void init_structs(void)
 {
     channels = dict_new();
+    cnicks = dict_new();
     clients = dict_new();
     servers = dict_new();
     userList_init(&curr_opers);
@@ -206,7 +208,13 @@ NickChange(struct userNode* user, const char *new_nick, int no_announce)
 struct userNode *
 GetUserH(const char *nick)
 {
-    return dict_find(clients, nick, NULL);
+    return dict_find(cnicks, nick, NULL);
+}
+
+struct userNode *
+GetUserUID(const char *numeric)
+{
+    return dict_find(clients, numeric, NULL);
 }
 
 static account_func_t account_func;
@@ -794,6 +802,7 @@ hash_cleanup(void)
         DelChannel(iter_data(it));
     }
     dict_delete(channels);
+    dict_delete(cnicks);
     dict_delete(clients);
     dict_delete(servers);
     userList_clean(&curr_opers);
