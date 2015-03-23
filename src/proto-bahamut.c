@@ -38,8 +38,8 @@ static dict_t service_msginfo_dict; /* holds service_message_info structs */
 static int uplink_capab;
 static void privmsg_user_helper(struct userNode *un, void *data);
 
-/* These correspond to 1 << X:      012345678901234567 */
-const char irc_user_mode_chars[] = "o iw dkg      r   ";
+/* These correspond to 1 << X:      012345678901234567890123456 */
+const char irc_user_mode_chars[] = "o iw dkg      r            ";
 
 void irc_svsmode(struct userNode *target, char *modes, unsigned long stamp);
 
@@ -835,7 +835,7 @@ static CMD_FUNC(cmd_sjoin) {
             if ((*pos == 'k') || (*pos == 'l')) n_modes++;
         }
         unsplit_string(argv+3, n_modes, modes);
-        cNode = AddChannel(argv[2], atoi(argv[1]), modes, NULL);
+        cNode = AddChannel(argv[2], atoi(argv[1]), modes, NULL, NULL, NULL, NULL);
     } else if (argv[3][0] == '0') {
         cNode = GetChannel(argv[2]);
     } else {

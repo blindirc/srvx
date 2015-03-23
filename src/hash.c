@@ -80,6 +80,12 @@ GetServerH(const char *name)
     return dict_find(servers, name, NULL);
 }
 
+struct server*
+GetServerID(const char *numeric)
+{
+    return dict_find(servers, numeric, NULL);
+}
+
 new_user_func_t *nuf_list;
 unsigned int nuf_size = 0, nuf_used = 0;
 
@@ -370,7 +376,7 @@ wipeout_channel(struct chanNode *cNode, unsigned long new_time, char **modes, un
 }
 
 struct chanNode *
-AddChannel(const char *name, unsigned long time_, const char *modes, char *banlist)
+AddChannel(const char *name, unsigned long time_, const char *modes, char *banlist, char *quietlist, char *exemptlist, char *invexlist)
 {
     struct chanNode *cNode;
     char new_modes[MAXLEN], *argv[MAXNUMPARAMS];

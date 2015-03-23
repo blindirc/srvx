@@ -321,7 +321,7 @@ blacklist_conf_read(void)
         str2 = database_get_data(node, "debug_channel_modes", RECDB_QSTRING);
         if (!str2)
             str2 = "+tinms";
-        conf.debug_channel = AddChannel(str1, now, str2, NULL);
+        conf.debug_channel = AddChannel(str1, now, str2, NULL, NULL, NULL, NULL);
         AddChannelUser(conf.debug_bot, conf.debug_channel)->modes |= MODE_CHANOP;
     } else {
         conf.debug_channel = NULL;

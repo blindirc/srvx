@@ -985,7 +985,7 @@ static MODCMD_FUNC(cmd_join)
             return 0;
         }
 
-        channel = AddChannel(argv[1], now, NULL, NULL);
+        channel = AddChannel(argv[1], now, NULL, NULL, NULL, NULL, NULL);
         AddChannelUser(bot, channel)->modes |= MODE_CHANOP;
     } else if (GetUserMode(channel, bot)) {
         reply("OSMSG_ALREADY_JOINED", channel->name);
@@ -2390,7 +2390,7 @@ static MODCMD_FUNC(cmd_clone)
     channel = GetChannel(argv[3]);
     if (!irccasecmp(argv[1], "JOIN")) {
         if (!channel
-            && !(channel = AddChannel(argv[3], now, NULL, NULL))) {
+            && !(channel = AddChannel(argv[3], now, NULL, NULL, NULL, NULL, NULL))) {
             reply("MSG_CHANNEL_UNKNOWN", argv[3]);
             return 0;
         }
@@ -3121,7 +3121,7 @@ opserv_discrim_create(struct userNode *user, unsigned int argc, char *argv[], in
                     send_message(user, opserv, "MSG_CHANNEL_UNKNOWN", argv[i]);
                     goto fail;
                 } else {
-                    discrim->channels[discrim->channel_count] = AddChannel(argv[i]+j, now, NULL, NULL);
+                    discrim->channels[discrim->channel_count] = AddChannel(argv[i]+j, now, NULL, NULL, NULL, NULL, NULL);
                 }
             }
             LockChannel(discrim->channels[discrim->channel_count]);
@@ -4155,7 +4155,7 @@ opserv_conf_read(void)
         str2 = database_get_data(conf_node, KEY_DEBUG_CHANNEL_MODES, RECDB_QSTRING);
         if (!str2)
             str2 = "+tinms";
-        opserv_conf.debug_channel = AddChannel(str, now, str2, NULL);
+        opserv_conf.debug_channel = AddChannel(str, now, str2, NULL, NULL, NULL, NULL);
         AddChannelUser(opserv, opserv_conf.debug_channel)->modes |= MODE_CHANOP;
     } else {
         opserv_conf.debug_channel = NULL;
@@ -4165,7 +4165,7 @@ opserv_conf_read(void)
         str2 = database_get_data(conf_node, KEY_ALERT_CHANNEL_MODES, RECDB_QSTRING);
         if (!str2)
             str2 = "+tns";
-        opserv_conf.alert_channel = AddChannel(str, now, str2, NULL);
+        opserv_conf.alert_channel = AddChannel(str, now, str2, NULL, NULL, NULL, NULL);
         AddChannelUser(opserv, opserv_conf.alert_channel)->modes |= MODE_CHANOP;
     } else {
         opserv_conf.alert_channel = NULL;
@@ -4175,7 +4175,7 @@ opserv_conf_read(void)
         str2 = database_get_data(conf_node, KEY_STAFF_AUTH_CHANNEL_MODES, RECDB_QSTRING);
         if (!str2)
             str2 = "+timns";
-        opserv_conf.staff_auth_channel = AddChannel(str, now, str2, NULL);
+        opserv_conf.staff_auth_channel = AddChannel(str, now, str2, NULL, NULL, NULL, NULL);
         AddChannelUser(opserv, opserv_conf.staff_auth_channel)->modes |= MODE_CHANOP;
     } else {
         opserv_conf.staff_auth_channel = NULL;

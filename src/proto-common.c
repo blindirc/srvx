@@ -486,7 +486,11 @@ static CMD_FUNC(cmd_part)
 
     if (argc < 2)
         return 0;
-    desc.user = GetUserH(origin);
+    #ifdef WITH_PROTOCOL_TS6
+        desc.user = GetUserUID(origin);
+    #else
+        desc.user = GetUserH(origin);
+    #endif
     if (!desc.user)
         return 0;
     desc.text = (argc > 2) ? argv[argc - 1] : NULL;

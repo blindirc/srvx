@@ -16,35 +16,36 @@
  * You should have received a copy of the GNU General Public License
  * along with srvx; if not, write to the Free Software Foundation,
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
+ * いつも何度でも ~
  */
 
 #include "proto-common.c"
 
-#define CAPAB_TS6       0x01
-#define CAPAB_NOQUIT    0x02
-#define CAPAB_SSJOIN    0x04
-#define CAPAB_BURST     0x08
-#define CAPAB_UNCONNECT 0x10
-#define CAPAB_NICKIP    0x20
-#define CAPAB_TSMODE    0x40
-#define CAPAB_ZIP       0x80
-#define CAPAB_QS        0x100
-#define CAPAB_EX        0x200
-#define CAPAB_CHW       0x400
-#define CAPAB_IE        0x800
-#define CAPAB_KLN       0x1000
-#define CAPAB_KNOCK     0x2000
-#define CAPAB_TB        0x8000
-#define CAPAB_UNKLN     0x10000
-#define CAPAB_CLUSTER   0x12000
-#define CAPAB_ENCAP     0x14000
-#define CAPAB_SERVICES  0x18000
-#define CAPAB_RSFNC     0x20000
-#define CAPAB_SAVE      0x22000
-#define CAPAB_EUID      0x24000
-#define CAPAB_EOPMOD    0x28000
-#define CAPAB_BAN       0x30000
-#define CAPAB_MLOCK     0x32000
+#define CAPAB_TS6       (1<<0)
+#define CAPAB_NOQUIT    (1<<1)
+#define CAPAB_SSJOIN    (1<<2)
+#define CAPAB_BURST     (1<<3)
+#define CAPAB_UNCONNECT (1<<4)
+#define CAPAB_NICKIP    (1<<5)
+#define CAPAB_TSMODE    (1<<6)
+#define CAPAB_ZIP       (1<<7)
+#define CAPAB_QS        (1<<8)
+#define CAPAB_EX        (1<<9)
+#define CAPAB_CHW       (1<<10)
+#define CAPAB_IE        (1<<11)
+#define CAPAB_KLN       (1<<12)
+#define CAPAB_KNOCK     (1<<13)
+#define CAPAB_TB        (1<<14)
+#define CAPAB_UNKLN     (1<<15)
+#define CAPAB_CLUSTER   (1<<16)
+#define CAPAB_ENCAP     (1<<17)
+#define CAPAB_SERVICES  (1<<18)
+#define CAPAB_RSFNC     (1<<19)
+#define CAPAB_SAVE      (1<<20)
+#define CAPAB_EUID      (1<<21)
+#define CAPAB_EOPMOD    (1<<22)
+#define CAPAB_BAN       (1<<23)
+#define CAPAB_MLOCK     (1<<24)
 
 struct service_message_info {
     privmsg_func_t on_privmsg;
@@ -55,8 +56,8 @@ static dict_t service_msginfo_dict; /* holds service_message_info structs */
 static int uplink_capab;
 static void privmsg_user_helper(struct userNode *un, void *data);
 
-/* These correspond to 1 << X:      012345678901234567 */
-const char irc_user_mode_chars[] = "o iw dSg      r   ";
+/* These correspond to 1 << X:      012345678901234567890123456 */
+const char irc_user_mode_chars[] = "o iw DS      x    ghalszQRZ";
 
 static struct userNode *AddUser(struct server* uplink, const char *nick, const char *ident, const char *hostname, const char *modes, const char *numeric, const char *userinfo, unsigned long timestamp, const char *realip);
 
@@ -337,27 +338,19 @@ irc_user(struct userNode *user) {
 void
 irc_account(struct userNode *user, UNUSED_ARG(const char *stamp), UNUSED_ARG(unsigned long timestamp), unsigned long serial)
 {
-    if (IsReggedNick(user)) {
-        irc_svsmode(user, "+rd", serial);
-    } else {
-        irc_svsmode(user, "+d", serial);
-    }
+    /* This isn't a TS6 thing */
 }
 
 void
-irc_fakehost(UNUSED_ARG(struct userNode *user), UNUSED_ARG(const char *host), UNUSED_ARG(const char *ident), UNUSED_ARG(int force))
+irc_fakehost(struct userNode *user, const char *host, UNUSED_ARG(const char *ident), UNUSED_ARG(int force))
 {
-    /* not supported in bahamut */
+    putsock(":%s CHGHOST %s :%s", self->numeric, user->numeric, host);
 }
 
 void
 irc_regnick(struct userNode *user)
 {
-    if (IsReggedNick(user)) {
-        irc_svsmode(user, "+r", 0);
-    } else {
-        irc_svsmode(user, "-r", 0);
-    }
+    /* This isn't a TS6 thing */
 }
 
 void
@@ -899,6 +892,7 @@ static CMD_FUNC(cmd_ping)
 static CMD_FUNC(cmd_pass_uplink)
 {
      AddServer(argv[4], "", 0, 0, now, argv[4], "");
+     return 1;
 }
 
 static CMD_FUNC(cmd_burst) {
@@ -971,7 +965,7 @@ static CMD_FUNC(cmd_sjoin) {
             if ((*pos == 'k') || (*pos == 'l')) n_modes++;
         }
         unsplit_string(argv+3, n_modes, modes);
-        cNode = AddChannel(argv[2], atoi(argv[1]), modes, NULL);
+        cNode = AddChannel(argv[2], atoi(argv[1]), modes, NULL, NULL, NULL, NULL);
     } else if (argv[3][0] == '0') {
         cNode = GetChannel(argv[2]);
     } else {
@@ -995,6 +989,53 @@ static CMD_FUNC(cmd_sjoin) {
     return 1;
 }
 
+static CMD_FUNC(cmd_join) {
+    struct chanNode *cNode;
+    struct userNode *uNode;
+    struct modeNode *mNode;
+    unsigned int next = 4, last;
+    char *nick, *nickend;
+
+    if ((argc == 4) && (uNode = GetUserUID(origin))) {
+        /* normal JOIN */
+        if (!(cNode = GetChannel(argv[2]))) {
+            log_module(MAIN_LOG, LOG_ERROR, "Unable to find JOIN target %s", argv[2]);
+            return 0;
+        }
+        AddChannelUser(uNode, cNode);
+        return 1;
+    }
+    if (argc < 5) return 0;
+    if (argv[3][0] == '+') {
+        char modes[MAXLEN], *pos;
+        int n_modes;
+        for (pos = argv[3], n_modes = 1; *pos; pos++) {
+            if ((*pos == 'k') || (*pos == 'l')) n_modes++;
+        }
+        unsplit_string(argv+3, n_modes, modes);
+        cNode = AddChannel(argv[2], atoi(argv[1]), modes, NULL, NULL, NULL, NULL);
+    } else if (argv[3][0] == '0') {
+        cNode = GetChannel(argv[2]);
+    } else {
+        log_module(MAIN_LOG, LOG_ERROR, "Unsure how to handle JOIN when arg 3 is %s", argv[3]);
+        return 0;
+    }
+
+    /* argv[next] is now the space-delimited, @+-prefixed list of
+     * nicks in the channel.  Split it and add the users. */
+    for (last = 0, nick = argv[next]; !last; nick = nickend + 1) {
+        int mode = 0;
+        for (nickend = nick; *nickend && (*nickend != ' '); nickend++) ;
+        if (!*nickend) last = 1;
+        *nickend = 0;
+        if (*nick == '@') { mode |= MODE_CHANOP; nick++; }
+        if (*nick == '+') { mode |= MODE_VOICE; nick++; }
+        if ((uNode = GetUserUID(nick)) && (mNode = AddChannelUser(uNode, cNode))) {
+            mNode->modes = mode;
+        }
+    }
+    return 1;
+}
 
 static CMD_FUNC(cmd_mode) {
     struct userNode *un;
@@ -1271,6 +1312,7 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "EUID", cmd_euid);
     dict_insert(irc_func_dict, "GNOTICE", cmd_dummy);
     dict_insert(irc_func_dict, "INVITE", cmd_dummy);
+    dict_insert(irc_func_dict, "JOIN", cmd_join);
     dict_insert(irc_func_dict, "KICK", cmd_kick);
     dict_insert(irc_func_dict, "KILL", cmd_kill);
     dict_insert(irc_func_dict, "LUSERSLOCK", cmd_dummy);
@@ -1295,7 +1337,7 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "TOPIC", cmd_topic);
     dict_insert(irc_func_dict, "VERSION", cmd_version);
     dict_insert(irc_func_dict, "WHOIS", cmd_whois);
-    dict_insert(irc_func_dict, "QS", NULL);
+    dict_insert(irc_func_dict, "QS", cmd_dummy);
     dict_insert(irc_func_dict, "331", cmd_num_topic);
     dict_insert(irc_func_dict, "332", cmd_num_topic);
     dict_insert(irc_func_dict, "333", cmd_num_topic);
@@ -1316,7 +1358,7 @@ int parse_line(char *line, int recursive) {
     /* DEBUG */ printf("[RECEIVED] %s\n", line);
     argc = split_line(line, true, ArrayLength(argv), argv);
     cmd = line[0] == ':';
-    /* DEBUG */ //fprintf(stdout, "command I see is %s\n", argv[cmd]);
+    /* DEBUG */ fprintf(stdout, "command I see is %s\n", argv[cmd]);
     if ((argc > cmd) && (func = dict_find(irc_func_dict, argv[cmd], NULL))) {
         char *origin;
         if (cmd) {
@@ -1424,10 +1466,17 @@ void mod_usermode(struct userNode *user, const char *mode_change) {
             if (add) invis_clients++; else invis_clients--;
             break;
         case 'w': do_user_mode(FLAGS_WALLOP); break;
-        case 'd': do_user_mode(FLAGS_DEAF); break;
-        case 'r': do_user_mode(FLAGS_REGNICK); break;
+        case 'D': do_user_mode(FLAGS_DEAF); break;
         case 'S': do_user_mode(FLAGS_SERVICE); break;
-        case 'g': do_user_mode(FLAGS_GLOBAL); break;
+        case 'g': do_user_mode(FLAGS_CALLERID); break;
+        case 'h': do_user_mode(FLAGS_HCLOACK); break;
+        case 'a': do_user_mode(FLAGS_ADMIN); break;
+        case 'l': do_user_mode(FLAGS_LOCOP); break;
+        case 's': do_user_mode(FLAGS_SNOTICE); break;
+        case 'z': do_user_mode(FLAGS_OPERWALL); break;
+        case 'Q': do_user_mode(FLAGS_NOFOWARD); break;
+        case 'R': do_user_mode(FLAGS_NOUNAUTHMSG); break;
+        case 'Z': do_user_mode(FLAGS_ISSSL); break;
         }
 #undef do_user_mode
     }
@@ -1455,8 +1504,7 @@ mod_chanmode_parse(struct chanNode *channel, char **modes, unsigned int argc, un
             add = 0;
             break;
 #define do_chan_mode(FLAG) do { if (add) change->modes_set |= FLAG, change->modes_clear &= ~FLAG; else change->modes_clear |= FLAG, change->modes_set &= ~FLAG; } while(0)
-        case 'R': do_chan_mode(MODE_REGONLY); break;
-        case 'D': do_chan_mode(MODE_DELAYJOINS); break;
+        case 'r': do_chan_mode(MODE_REGONLY); break;
         case 'c': do_chan_mode(MODE_NOCOLORS); break;
         case 'i': do_chan_mode(MODE_INVITEONLY); break;
         case 'm': do_chan_mode(MODE_MODERATED); break;
@@ -1464,14 +1512,13 @@ mod_chanmode_parse(struct chanNode *channel, char **modes, unsigned int argc, un
         case 'p': do_chan_mode(MODE_PRIVATE); break;
         case 's': do_chan_mode(MODE_SECRET); break;
         case 't': do_chan_mode(MODE_TOPICLIMIT); break;
-        case 'r':
-            if (!(flags & MCP_REGISTERED)) {
-             do_chan_mode(MODE_REGISTERED);
-            } else {
-             mod_chanmode_free(change);
-             return NULL;
-            }
-            break;
+        case 'g': do_chan_mode(MODE_FREEINVITE); break;
+        case 'z': do_chan_mode(MODE_OPMODERATED); break;
+        case 'L': do_chan_mode(MODE_LARGEBANLIST); break;
+        case 'P': do_chan_mode(MODE_PERMINANT); break;
+        case 'F': do_chan_mode(MODE_FREETARGET); break;
+        case 'Q': do_chan_mode(MODE_DISABLEFORWARD); break;
+        case 'C': do_chan_mode(MODE_NOCTCPS); break;
 #undef do_chan_mode
         case 'l':
             if (add) {
@@ -1600,10 +1647,15 @@ mod_chanmode_announce(struct userNode *who, struct chanNode *channel, struct mod
         DO_MODE_CHAR(INVITEONLY, 'i');
         DO_MODE_CHAR(NOPRIVMSGS, 'n');
         DO_MODE_CHAR(LIMIT, 'l');
-        DO_MODE_CHAR(DELAYJOINS, 'D');
-        DO_MODE_CHAR(REGONLY, 'R');
+        DO_MODE_CHAR(REGONLY, 'r');
         DO_MODE_CHAR(NOCOLORS, 'c');
-        DO_MODE_CHAR(REGISTERED, 'r');
+        DO_MODE_CHAR(FREEINVITE, 'g');
+        DO_MODE_CHAR(OPMODERATED, 'z');
+        DO_MODE_CHAR(LARGEBANLIST, 'L');
+        DO_MODE_CHAR(PERMINANT, 'P');
+        DO_MODE_CHAR(FREETARGET, 'F');
+        DO_MODE_CHAR(DISABLEFORWARD, 'Q');
+        DO_MODE_CHAR(NOCTCPS, 'C');
 #undef DO_MODE_CHAR
         if (change->modes_clear & channel->modes & MODE_KEY)
             mod_chanmode_append(&chbuf, 'k', channel->key);
@@ -1635,10 +1687,15 @@ mod_chanmode_announce(struct userNode *who, struct chanNode *channel, struct mod
         DO_MODE_CHAR(TOPICLIMIT, 't');
         DO_MODE_CHAR(INVITEONLY, 'i');
         DO_MODE_CHAR(NOPRIVMSGS, 'n');
-        DO_MODE_CHAR(DELAYJOINS, 'D');
-        DO_MODE_CHAR(REGONLY, 'R');
+        DO_MODE_CHAR(REGONLY, 'r');
         DO_MODE_CHAR(NOCOLORS, 'c');
-        DO_MODE_CHAR(REGISTERED, 'r');
+        DO_MODE_CHAR(FREEINVITE, 'g');
+        DO_MODE_CHAR(OPMODERATED, 'z');
+        DO_MODE_CHAR(LARGEBANLIST, 'L');
+        DO_MODE_CHAR(PERMINANT, 'P');
+        DO_MODE_CHAR(FREETARGET, 'F');
+        DO_MODE_CHAR(DISABLEFORWARD, 'Q');
+        DO_MODE_CHAR(NOCTCPS, 'C');
 #undef DO_MODE_CHAR
         if (change->modes_set & MODE_KEY)
             mod_chanmode_append(&chbuf, 'k', change->new_key);
@@ -1692,10 +1749,15 @@ mod_chanmode_format(struct mod_chanmode *change, char *outbuff)
         DO_MODE_CHAR(NOPRIVMSGS, 'n');
         DO_MODE_CHAR(LIMIT, 'l');
         DO_MODE_CHAR(KEY, 'k');
-        DO_MODE_CHAR(DELAYJOINS, 'D');
-        DO_MODE_CHAR(REGONLY, 'R');
+        DO_MODE_CHAR(REGONLY, 'r');
         DO_MODE_CHAR(NOCOLORS, 'c');
-        DO_MODE_CHAR(REGISTERED, 'r');
+        DO_MODE_CHAR(FREEINVITE, 'g');
+        DO_MODE_CHAR(OPMODERATED, 'z');
+        DO_MODE_CHAR(LARGEBANLIST, 'L');
+        DO_MODE_CHAR(PERMINANT, 'P');
+        DO_MODE_CHAR(FREETARGET, 'F');
+        DO_MODE_CHAR(DISABLEFORWARD, 'Q');
+        DO_MODE_CHAR(NOCTCPS, 'C');
 #undef DO_MODE_CHAR
     }
     if (change->modes_set) {
@@ -1707,10 +1769,15 @@ mod_chanmode_format(struct mod_chanmode *change, char *outbuff)
         DO_MODE_CHAR(TOPICLIMIT, 't');
         DO_MODE_CHAR(INVITEONLY, 'i');
         DO_MODE_CHAR(NOPRIVMSGS, 'n');
-        DO_MODE_CHAR(DELAYJOINS, 'D');
-        DO_MODE_CHAR(REGONLY, 'R');
+        DO_MODE_CHAR(REGONLY, 'r');
         DO_MODE_CHAR(NOCOLORS, 'c');
-        DO_MODE_CHAR(REGISTERED, 'r');
+        DO_MODE_CHAR(FREEINVITE, 'g');
+        DO_MODE_CHAR(OPMODERATED, 'z');
+        DO_MODE_CHAR(LARGEBANLIST, 'L');
+        DO_MODE_CHAR(PERMINANT, 'P');
+        DO_MODE_CHAR(FREETARGET, 'F');
+        DO_MODE_CHAR(DISABLEFORWARD, 'Q');
+        DO_MODE_CHAR(NOCTCPS, 'C');
         DO_MODE_CHAR(LIMIT, 'l'), args_used += sprintf(args + args_used, " %d", change->new_limit);
         DO_MODE_CHAR(KEY, 'k'), args_used += sprintf(args + args_used, " %s", change->new_key);
 #undef DO_MODE_CHAR

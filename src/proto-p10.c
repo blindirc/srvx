@@ -299,8 +299,8 @@ static const char *his_servername;
 static const char *his_servercomment;
 static struct channelList dead_channels;
 
-/* These correspond to 1 << X:      012345678901234567 */
-const char irc_user_mode_chars[] = "o iw dkgn    x   I";
+/* These correspond to 1 << X:      012345678901234567890123456 */
+const char irc_user_mode_chars[] = "o iw dkgn    x   I         ";
 
 static struct userNode *AddUser(struct server* uplink, const char *nick, const char *ident, const char *hostname, const char *modes, const char *numeric, const char *userinfo, unsigned long timestamp, const char *realip);
 
@@ -1168,7 +1168,7 @@ create_helper(char *name, void *data)
         return;
     }
 
-    AddChannelUser(cd->user, AddChannel(name, cd->when, NULL, NULL));
+    AddChannelUser(cd->user, AddChannel(name, cd->when, NULL, NULL, NULL, NULL, NULL));
 }
 
 static CMD_FUNC(cmd_create)
@@ -1320,7 +1320,7 @@ static CMD_FUNC(cmd_burst)
         dict_remove(unbursted_channels, cNode->name);
         irc_burst(cNode);
     }
-    cNode = AddChannel(argv[1], in_timestamp, modes, banlist);
+    cNode = AddChannel(argv[1], in_timestamp, modes, banlist, NULL, NULL, NULL); /* P10 doesn't support quiets, exempts or invexs */
 
     /* Burst channel members in now. */
     for (user = members, sep = *members, mode = 0; sep; user = end) {

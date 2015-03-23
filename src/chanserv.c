@@ -244,6 +244,7 @@ static const struct message_entry msgtab[] = {
     { "CSMSG_DEFAULTED_MODES", "Channel modes for $b%s$b are set to their defaults." },
     { "CSMSG_NO_MODES", "$b%s$b does not have any default modes." },
     { "CSMSG_MODE_LOCKED", "Modes conflicting with $b%s$b are not allowed in %s." },
+    { "CSMSG_MODE_OPER_ONLY", "Mode $b%s$b may only be set by IRC Operators." },
     { "CSMSG_CANNOT_SET", "That setting is above your current level, so you cannot change it." },
     { "CSMSG_OWNER_DEFAULTS", "You must have access 500 in %s to reset it to the default options." },
     { "CSMSG_CONFIRM_DEFAULTS", "To reset %s's settings to the defaults, you must use 'set defaults %s'." },
@@ -2075,7 +2076,7 @@ static CHANSERV_FUNC(cmd_register)
     }
 
     if(new_channel)
-        channel = AddChannel(argv[1], now, NULL, NULL);
+        channel = AddChannel(argv[1], now, NULL, NULL, NULL, NULL, NULL);
 
     cData = register_channel(channel, user->handle_info->handle);
     scan_user_presence(add_channel_user(cData, handle, UL_OWNER, 0, NULL), NULL);
@@ -2224,7 +2225,7 @@ static CHANSERV_FUNC(cmd_move)
     mod_chanmode_init(&change);
     if(!(target = GetChannel(argv[1])))
     {
-        target = AddChannel(argv[1], now, NULL, NULL);
+        target = AddChannel(argv[1], now, NULL, NULL, NULL, NULL, NULL);
         if(!IsSuspended(channel->channel_info))
             AddChannelUser(chanserv, target);
     }
@@ -6944,7 +6945,7 @@ chanserv_conf_read(void)
             const char *str2 = database_get_data(conf_node, KEY_SUPPORT_CHANNEL_MODES, RECDB_QSTRING);
             if(!str2)
                 str2 = "+nt";
-            chan = AddChannel(strlist->list[ii], now, str2, NULL);
+            chan = AddChannel(strlist->list[ii], now, str2, NULL, NULL, NULL, NULL);
             LockChannel(chan);
             channelList_append(&chanserv_conf.support_channels, chan);
         }
@@ -6955,7 +6956,7 @@ chanserv_conf_read(void)
         str2 = database_get_data(conf_node, KEY_SUPPORT_CHANNEL_MODES, RECDB_QSTRING);
         if(!str2)
             str2 = "+nt";
-        chan = AddChannel(str, now, str2, NULL);
+        chan = AddChannel(str, now, str2, NULL, NULL, NULL, NULL);
         LockChannel(chan);
         channelList_append(&chanserv_conf.support_channels, chan);
     }
@@ -7233,7 +7234,7 @@ chanserv_channel_read(const char *key, struct record_data *hir)
     str = database_get_data(channel, KEY_REGISTRAR, RECDB_QSTRING);
     if(!str)
         str = "<unknown>";
-    cNode = AddChannel(key, now, NULL, NULL);
+    cNode = AddChannel(key, now, NULL, NULL, NULL, NULL, NULL);
     if(!cNode)
     {
         log_module(CS_LOG, LOG_ERROR, "Unable to create registered channel %s.", key);

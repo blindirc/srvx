@@ -89,6 +89,10 @@ struct server* GetServerN(const char *numeric);
 struct userNode* GetUserN(const char *numeric);
 #endif
 
+#ifdef WITH_PROTOCOL_TS6
+struct server* GetServerN(const char *numeric);
+#endif
+
 /* Basic protocol parsing support. */
 void init_parse(void);
 int parse_line(char *line, int recursive);
