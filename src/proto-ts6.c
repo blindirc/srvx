@@ -240,8 +240,8 @@ AddUser(struct server* uplink, const char *nick, const char *ident, const char *
     printf("[DEBUG] Adding new client! %s %s %s\n", uNode->nick, uNode->numeric, modes);
     dict_insert(cnicks, uNode->nick, uNode);
     dict_insert(clients, uNode->numeric, uNode);
-    if (dict_size(clients) > max_clients) {
-        max_clients = dict_size(clients);
+    if (dict_size(cnicks) > max_clients) {
+        max_clients = dict_size(cnicks);
         max_clients_time = now;
     }
     if (IsLocal(uNode))
@@ -318,10 +318,10 @@ DelUser(struct userNode* user, struct userNode *killer, int announce, const char
 void
 irc_server(struct server *srv) {
     if (srv == self) {
-        putsock("SERVER %s %d :%s", srv->name, srv->hops, srv->description);
+        putsock("SERVER %s %d :%s", srv->name, srv->hops+1, srv->description);
     }/* else {
         putsock(":%s SERVER %s %d :%s", self->name, srv->name, srv->hops, srv->description);
-        printf("else :%s SERVER %s %d :%s\n", self->name, srv->name, srv->hops, srv->description);
+        printf("else :%s SERVER %s %d :%s\n", self->name, srv->name, srv->hops+1, srv->description);
     }*/
 }
 
@@ -406,7 +406,8 @@ irc_pong(const char *who, const char *data) {
 
 void
 irc_quit(struct userNode *user, const char *message) {
-    putsock(":%s QUIT :%s", user->nick, message);
+    printf(":%s QUIT :%s", user->numeric, message);
+    putsock(":%s QUIT :%s", user->numeric, message);
 }
 
 void
@@ -417,6 +418,7 @@ irc_squit(struct server *srv, const char *message, const char *service_message)
 
     /* Are we leaving the network? */
     if (srv == self && cManager.uplink->state == CONNECTED) {
+        printf("WERE LEAVING!\n");
         unsigned int i;
 
         /* Quit all clients linked to me. */
@@ -427,7 +429,7 @@ irc_squit(struct server *srv, const char *message, const char *service_message)
         }
     }
 
-    putsock(":%s SQUIT %s 0 :%s", self->numeric, srv->name, message);
+    putsock("SQUIT %s :%s", self->numeric, message);
 
     if (srv == self) {
         /* Force a reconnect to the currently selected server. */
@@ -504,6 +506,7 @@ irc_invite(struct userNode *from, struct userNode *who, struct chanNode *to) {
 
 void
 irc_mode(struct userNode *who, struct chanNode *target, const char *modes) {
+    printf("[MODE]:%s TMODE %lu %s %s\n", who->numeric, (unsigned long)target->timestamp, target->name, modes);
     putsock(":%s TMODE %lu %s %s", who->numeric, (unsigned long)target->timestamp, target->name, modes);
 }
 
@@ -559,7 +562,7 @@ irc_gline(struct server *srv, struct gline *gline) {
     if (len > ArrayLength(ident)) len = ArrayLength(ident);
     safestrncpy(ident, gline->target, len);
     safestrncpy(host, sep+1, ArrayLength(host));
-    putsock(":%s AKILL %s %s %lu %s %lu :%s", self->name, host, ident, (unsigned long)(gline->expires-gline->issued), gline->issuer, (unsigned long)gline->issued, gline->reason);
+    putsock(":%s BAN K %s %s %lu %lu %lu * :%s", self->name, ident, host, (unsigned long)gline->issued, (unsigned long)(gline->expires-gline->issued), (unsigned long)(gline->expires-gline->issued), gline->reason);
 }
 
 void
@@ -580,7 +583,7 @@ irc_ungline(const char *mask) {
     if (len > ArrayLength(ident)) len = ArrayLength(ident);
     safestrncpy(ident, mask, len);
     safestrncpy(host, sep+1, ArrayLength(host));
-    putsock(":%s RAKILL %s %s", self->name, host, ident);
+    putsock(":%s BAN K %s %s %lu 0 33 * *", self->name, ident, host, (unsigned long)(now));
 }
 
 void
@@ -891,7 +894,7 @@ static CMD_FUNC(cmd_ping)
 
 static CMD_FUNC(cmd_pass_uplink)
 {
-     AddServer(argv[4], "", 0, 0, now, argv[4], "");
+     AddServer(argv[4], "cherry.beetus", 0, 0, now, argv[4], "");
      return 1;
 }
 
@@ -1101,18 +1104,18 @@ static CMD_FUNC(cmd_tmode) {
 
 static CMD_FUNC(cmd_topic) {
     struct chanNode *cn;
-    if (argc < 5) return 0;
+    if (argc < 4) return 0;
     if (!(cn = GetChannel(argv[1]))) {
         log_module(MAIN_LOG, LOG_ERROR, "Unable to find channel %s whose topic is being set", argv[1]);
         return 0;
     }
-    if (irccasecmp(origin, argv[2])) {
+    if (irccasecmp(origin, argv[3])) {
         /* coming from a topic burst; the origin is a server */
         safestrncpy(cn->topic, argv[4], sizeof(cn->topic));
-        safestrncpy(cn->topic_nick, argv[2], sizeof(cn->topic_nick));
-        cn->topic_time = atoi(argv[3]);
+        safestrncpy(cn->topic_nick, argv[3], sizeof(cn->topic_nick));
+        cn->topic_time = atoi(argv[2]);
     } else {
-        SetChannelTopic(cn, GetUserH(argv[2]), argv[4], 0);
+        SetChannelTopic(cn, GetUserUID(origin), argv[2], 0);
     }
     return 1;
 }
@@ -1234,12 +1237,6 @@ static CMD_FUNC(cmd_num_unknown_mode)
     return 1;
 }
 
-static CMD_FUNC(cmd_num_illegle_chan)
-{
-    /* Illegle channel name, we don't care */
-    return 1;
-}
-
 static CMD_FUNC(cmd_num_collision)
 {
     struct userNode *user;
@@ -1334,6 +1331,7 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "STATS", cmd_stats);
     dict_insert(irc_func_dict, "SVSNICK", cmd_svsnick);
     dict_insert(irc_func_dict, "SVINFO", cmd_svinfo);
+    dict_insert(irc_func_dict, "TB", cmd_topic);
     dict_insert(irc_func_dict, "TOPIC", cmd_topic);
     dict_insert(irc_func_dict, "VERSION", cmd_version);
     dict_insert(irc_func_dict, "WHOIS", cmd_whois);
@@ -1344,7 +1342,7 @@ void init_parse(void) {
     dict_insert(irc_func_dict, "413", cmd_num_topic);
     dict_insert(irc_func_dict, "436", cmd_num_collision);
     dict_insert(irc_func_dict, "472", cmd_num_unknown_mode);
-    dict_insert(irc_func_dict, "479", cmd_num_illegle_chan);
+    dict_insert(irc_func_dict, "479", cmd_dummy); /* Illegle channel */
 
     userList_init(&dead_users);
     reg_exit_func(parse_cleanup);
